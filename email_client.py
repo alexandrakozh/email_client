@@ -228,3 +228,34 @@ if __name__ == "__main__":
                        args.data_file, args.count, args.concurrency, args.send_stdout, args.attachment_path,
                        args.rcpt_to)
     mail.message_type_choose()
+
+
+ """   @classmethod
+    def create(cls, args):
+        # Example: mail = EmailClient.create(mail_agrument_parsing())
+        mail = cls(args.smtp_adress, args.mail_from, args.rcpt_to, args.tls, args.user,
+                   args.pwd,  args.header, args.data, args.data_file, args.count,
+                   args.concurrency, args.send_stdout, args.attachment_path)
+        mail.message_type_choose()
+        return mail"""
+
+
+# class EmailClient(object):
+#
+#     def __init__(self, args):
+#         self.smtp_address = args.smtp_address
+#         self.mail_from = args.mail_from
+#         self.rcpt_to = args.rcpt_to
+#         self.tls = args.tls
+#         self.user = args.user
+#         self.pwd = args.pwd
+#         self.header = args.header
+#         self.data = args.data
+#         self.data_file = args.data_file
+#         self.count = args.count
+#         self.concurrency = args.concurrency
+#         self.send_stdout = args.send_stdout
+#         self.attachment_path = args.attachment_path
+#         self.message = None
+
+
