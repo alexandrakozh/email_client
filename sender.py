@@ -1,5 +1,14 @@
 import argparse
-import smtplib
+import re
+
+def header_type(string):
+    pattern = re.compile("(?P<header_name>\w+-?\w+)=(?P<header_value>[\w ]+)")
+    match =  pattern.match(string)
+    if not match:
+        msg = "%r is not an appropriate header type (name=value)" % string
+        raise argparse.ArgumentTypeError(msg)
+    return string
+
 
 def mail_agrument_configuring():
     parser = argparse.ArgumentParser()
@@ -17,6 +26,7 @@ def mail_agrument_configuring():
     parser.add_argument('--pwd', action='store', default=None,
                         help='Password of sender')
     parser.add_argument('--header', action='store', nargs='*', default=[],
+                        type=header_type,
                         help='Headers of the message in format name=value')
     parser.add_argument('--data', action='store', default=None,
                         help='Text, which message will contain')
@@ -33,48 +43,9 @@ def mail_agrument_configuring():
     return parser
 
 
-class EmailClient(object):
-
-    def __init__(self, smtp_address, mail_from, rcpt_to, tls=False, 
-                user=None, pwd=None,  header=None, data=None,data_file=None, count=1,
-                concurrency=1,send_stdout=False, attachment_path=None):
-        self.smtp_address = smtp_address
-        self.mail_from = mail_from
-        self.rcpt_to = rcpt_to
-        self.tls = tls
-        self.user = user
-        self.pwd = pwd
-        self.header = header
-        self.data = data
-        self.data_file = data_file
-        self.count = count
-        self.concurrency = concurrency
-        self.send_stdout = send_stdout
-        self.attachment_path = attachment_path
-        self.message = None
-
-    def send_mail(self):
-        self.message = "From: %s\r\n To: %s\r\n Subject: %s\r\n\r\n" % (self.mail_from, ", ".join(self.rcpt_to), self.header)
-        server = SMTP(self.smtp_address)
-        server.ehlo()
-        if self.tls:
-            server.starttls()
-        server.login(self.user, self.pwd)
-
-        try:
-            server.sendmail(self.mail_from, self.rcpt_to, self.message)
-            print 'Your message was successfully send! Congratulations!!!'
-        except Exception:
-            raise SendingMailError('Unable to send an e-mail. Please try again!!')
-        finally:
-            server.quit()
-
 
 if __name__ == "__main__":
-    args = mail_agrument_parsing_and_configuring()
-    args.parse_args()
-    mail = EmailClient(args.smtp_adress, args.mail_from, args.rcpt_to, args.tls, 
-                        args.user, args.pwd, args.header, args.data, args.data_file, 
-                        args.count, args.concurrency, args.send_stdout, args.attachment_path
-                        )
+    args = mail_agrument_configuring()
+    print args.parse_args()
+
 
