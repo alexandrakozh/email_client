@@ -69,13 +69,13 @@ def arg_by_key(arg):
 class TestEmailClient(unittest.TestCase):
 
     def test_mail_argument_configuring_default_values(self):
-        parser = sender.mail_agrument_configuring()
+        parser = sender.mail_argument_configuration()
         res = parser.parse_args(dict_to_cmd_list(required_args))
         for key, value in default_args.items():
             self.assertEqual(getattr(res, key), default_args[key])
 
     def test_mail_argument_configuring_all_values(self):
-        parser = sender.mail_agrument_configuring()
+        parser = sender.mail_argument_configuration()
         res = parser.parse_args(dict_to_cmd_list(all_args_for_list))
         for key, value in all_args_for_list.items():
             self.assertEqual(getattr(res, arg_by_key(key)), all_args_for_list[key])
@@ -91,7 +91,7 @@ class TestEmailClient(unittest.TestCase):
                 args_without_one_positional.append(tup)
             args_without_one_positional = OrderedDict(args_without_one_positional)
             with patch.object(ArgumentParser, 'exit') as mock_method:
-                parser = sender.mail_agrument_configuring()
+                parser = sender.mail_argument_configuration()
                 parser.parse_args(dict_to_cmd_list(args_without_one_positional))
                 mock_method.assert_called()
             i += 1
