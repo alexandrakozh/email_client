@@ -11,7 +11,6 @@ from email.mime.base import MIMEBase
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 
-#TODO subject
 
 def header_type(string):
     pattern = re.compile("(?P<header_name>\w+-?\w+)=(?P<header_value>[\w ]+)")
@@ -22,13 +21,24 @@ def header_type(string):
     return string
 
 
+def defining_subject(headers):
+    header_subject = None
+    for i in headers:
+        if i.startswith("Subject"):
+            header_subject = i
+        else:
+            continue
+    subject = header_subject.split("=")[-1]
+    return subject
+
+
 def mail_argument_configuration():
     parser = argparse.ArgumentParser()
     parser.add_argument('smtp_address', action='store',
-                        help='Host (ip-adress) and port of mail server')
+                        help='Host (ip-address) and port of mail server')
     parser.add_argument('--mail_from', action='store',
                         required=True,
-                        help='E-mail adress of sender')
+                        help='E-mail address of sender')
     parser.add_argument('--rcpt_to', action='store', nargs='+', required=True,
                         help='People who e-mail adress to')
     parser.add_argument('--tls', action='store_true',
@@ -77,6 +87,7 @@ class EmailCreation(object):
         self.attachment_path = attachment_path
         self.rcpt_to = rcpt_to
         self.message = None
+        self.subject = None
 
     def main(self):
         if not sys.stdin.isatty():
@@ -98,32 +109,39 @@ class EmailCreation(object):
             return self.creating_singlepart_msg()
 
     def creating_singlepart_msg(self):
+        self.subject = defining_subject(self.header)
         if len(self.attachment_path) != 0 and os.path.isfile(self.attachment_path[0]):
             self.message = MIMEMultipart()
-            #self.message['Subject'] = self.header
+            self.message['Subject'] = self.subject
             self.message['From'] = self.mail_from
             self.message['To'] = ", ".join(self.rcpt_to)
-            attachment = str(self.attachment_path)
-            self.attaching_files_to_message(attachment)
-            return self.message
+            self.attaching_files_to_message(self.attachment_path[0])
+            print self.message
 
         if self.data_file is not None:
             with open(self.data_file, 'rb') as fp:
-                text = fp.read()
-        else:
-            text = self.data
-
-        self.message = MIMEText(text)
-        #self.message['Subject'] = self.header
+                self.message = MIMEText(fp.read())
+        elif self.data is not None:
+            self.message = MIMEText(self.data)
+        self.message['Subject'] = self.subject
         self.message['From'] = self.mail_from
         self.message['To'] = ", ".join(self.rcpt_to)
         print self.message
 
     def creating_multipart_msg(self):
+        self.subject = defining_subject(self.header)
         self.message = MIMEMultipart()
-        #self.message['Subject'] = self.header
+        self.message['Subject'] = self.subject
         self.message['From'] = self.mail_from
         self.message['To'] = ", ".join(self.rcpt_to)
+        if self.data_file is not None:
+            with open(self.data_file, 'rb') as fp:
+                text = fp.read()
+                msg = MIMEText(text)
+                self.message.attach(msg)
+        elif self.data is not None:
+            msg = MIMEText(self.data)
+            self.message.attach(msg)
         for attachment in self.attachment_path:
             if not os.path.isfile(attachment):
                 continue
@@ -149,6 +167,7 @@ class EmailCreation(object):
             self.message.attach(msg)
         except Exception:
             raise AttachmentFileError("The file cannot be attached. Please try again!")
+        return self.message
 
 
 class EmailSending(object):
