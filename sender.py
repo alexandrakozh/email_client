@@ -10,6 +10,7 @@ from email.mime.audio import MIMEAudio
 from email.mime.base import MIMEBase
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
+from smtplib import SMTP
 
 
 def header_type(string):
@@ -69,7 +70,7 @@ class AttachmentFileError(Exception):
     pass
 
 
-class EmailCreation(object):
+class EmailCreationAndSending(object):
 
     def __init__(self, smtp_address, mail_from, rcpt_to, tls=False, user=None, pwd=None, header=None, data=None,
                  data_file=None, count=1, concurrency=1, send_stdout=False, attachment_path=None):
@@ -95,6 +96,12 @@ class EmailCreation(object):
         else:
             self.message_creation()
 
+        # choose between sending message to std_out and sending via server to recipient
+        if self.send_stdout:
+            return sys.stdout.write(self.message)
+        else:
+            return self.send_mail()
+
     def reading_from_stdin(self):
         email_file = sys.stdin
         self.message = email_file.read()
@@ -116,7 +123,7 @@ class EmailCreation(object):
             self.message['From'] = self.mail_from
             self.message['To'] = ", ".join(self.rcpt_to)
             self.attaching_files_to_message(self.attachment_path[0])
-            print self.message
+            return self.message
 
         if self.data_file is not None:
             with open(self.data_file, 'rb') as fp:
@@ -126,7 +133,7 @@ class EmailCreation(object):
         self.message['Subject'] = self.subject
         self.message['From'] = self.mail_from
         self.message['To'] = ", ".join(self.rcpt_to)
-        print self.message
+        return self.message
 
     def creating_multipart_msg(self):
         self.subject = defining_subject(self.header)
@@ -134,6 +141,7 @@ class EmailCreation(object):
         self.message['Subject'] = self.subject
         self.message['From'] = self.mail_from
         self.message['To'] = ", ".join(self.rcpt_to)
+
         if self.data_file is not None:
             with open(self.data_file, 'rb') as fp:
                 text = fp.read()
@@ -142,11 +150,12 @@ class EmailCreation(object):
         elif self.data is not None:
             msg = MIMEText(self.data)
             self.message.attach(msg)
+
         for attachment in self.attachment_path:
             if not os.path.isfile(attachment):
                 continue
             self.attaching_files_to_message(attachment)
-        print self.message
+        return self.message
 
     def attaching_files_to_message(self, attachment_file):
         try:
@@ -169,9 +178,20 @@ class EmailCreation(object):
             raise AttachmentFileError("The file cannot be attached. Please try again!")
         return self.message
 
+    def send_mail(self):
+        server = SMTP(self.smtp_address)
+        server.ehlo()
+        if self.tls:
+            server.starttls()
+        server.login(self.user, self.pwd)
 
-class EmailSending(object):
-    pass
+        try:
+            server.sendmail(self.mail_from, self.rcpt_to, self.message)
+            print 'Your message was successfully send! Congratulations!!!'
+        except Exception:
+            raise SendingMailError('Unable to send an e-mail. Please try again!!')
+        finally:
+            server.quit()
 
 
 if __name__ == "__main__":
