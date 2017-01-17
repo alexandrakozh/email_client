@@ -188,7 +188,6 @@ class EmailCreationAndSending(object):
                 else:
                     msg = MIMEBase(maintype, subtype)
                     msg.set_payload(fp.read())
-            email.encoders.encode_base64(msg)
             msg.add_header("Content-Disposition", 'attachment', filename=attachment_file)
             self.message.attach(msg)
         except Exception:
