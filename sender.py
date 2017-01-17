@@ -197,16 +197,17 @@ class EmailCreationAndSending(object):
 
     def send_mail(self):
         server = SMTP(self.smtp_address)
+        print "Client is connected to server"
         server.ehlo()
         if self.tls:
             server.starttls()
         server.login(self.user, self.pwd)
-
+        print "Username and password are correct"
         try:
-            server.sendmail(self.mail_from, self.rcpt_to, self.message)
+            server.sendmail(self.mail_from, self.rcpt_to, self.message.as_string())
             print 'Your message was successfully send! Congratulations!!!'
         except Exception:
-            raise SendingMailError('Unable to send an e-mail. Please try again!!')
+            raise SendingMailError("Message cannot be sent!")
         finally:
             server.quit()
 
