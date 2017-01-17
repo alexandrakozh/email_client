@@ -33,6 +33,11 @@ def defining_subject(headers):
     return subject
 
 
+def separating_header_name_and_value(header):
+    header_name, header_value = header.split("=")
+    return header_name, header_value
+
+
 def mail_argument_configuration():
     parser = argparse.ArgumentParser()
     parser.add_argument('smtp_address', action='store',
@@ -41,7 +46,7 @@ def mail_argument_configuration():
                         required=True,
                         help='E-mail address of sender')
     parser.add_argument('--rcpt_to', action='store', nargs='+', required=True,
-                        help='People who e-mail adress to')
+                        help='People who e-mail address to')
     parser.add_argument('--tls', action='store_true',
                         help='Configuring TLS access')
     parser.add_argument('--user', action='store', default=None,
@@ -67,6 +72,10 @@ def mail_argument_configuration():
 
 
 class AttachmentFileError(Exception):
+    pass
+
+
+class SendingMailError(Exception):
     pass
 
 
@@ -98,7 +107,7 @@ class EmailCreationAndSending(object):
 
         # choose between sending message to std_out and sending via server to recipient
         if self.send_stdout:
-            return sys.stdout.write(self.message)
+            print self.message
         else:
             return self.send_mail()
 
@@ -122,6 +131,10 @@ class EmailCreationAndSending(object):
             self.message['Subject'] = self.subject
             self.message['From'] = self.mail_from
             self.message['To'] = ", ".join(self.rcpt_to)
+            if len(self.header) > 0:
+                for header in self.header:
+                    header_name, header_value = separating_header_name_and_value(header)
+                    self.message[header_name] = header_value
             self.attaching_files_to_message(self.attachment_path[0])
             return self.message
 
@@ -141,6 +154,10 @@ class EmailCreationAndSending(object):
         self.message['Subject'] = self.subject
         self.message['From'] = self.mail_from
         self.message['To'] = ", ".join(self.rcpt_to)
+        if len(self.header) > 0:
+            for header in self.header:
+                header_name, header_value = separating_header_name_and_value(header)
+                self.message[header_name] = header_value
 
         if self.data_file is not None:
             with open(self.data_file, 'rb') as fp:
@@ -198,7 +215,8 @@ if __name__ == "__main__":
     p = mail_argument_configuration()
     args = p.parse_args()
     print args
-    mail = EmailCreation(args.smtp_address, args.mail_from, args.rcpt_to, args.tls, args.user, args.pwd, args.header,
+    mail = EmailCreationAndSending(args.smtp_address, args.mail_from, args.rcpt_to, args.tls, args.user, args.pwd, args.header,
                          args.data, args.data_file, args.count, args.concurrency, args.send_stdout,
                          args.attachment_path)
     mail.main()
+
