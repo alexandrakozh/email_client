@@ -117,16 +117,23 @@ class EmailCreationAndSending(object):
         return self.message
 
     def message_creation(self):
-        if len(self.attachment_path) > 1:
+        if len(self.attachment_path) == 1:
+            if self.data is None and self.data_file is None:
+                print "One attachment - singlepart"
+                return self.creating_singlepart_msg()
+            else:
+                print "One attachment - multipart"
+                return self.creating_multipart_msg()
+        elif len(self.attachment_path) > 1:
+            print "MULTIPART"
             return self.creating_multipart_msg()
-        elif (len(self.attachment_path) == 1) and (self.data is None and self.data_file is None):
-            return self.creating_singlepart_msg()
         else:
+            print "Just singlepart"
             return self.creating_singlepart_msg()
 
     def creating_singlepart_msg(self):
         self.subject = defining_subject(self.header)
-        if len(self.attachment_path) != 0 and os.path.isfile(self.attachment_path[0]):
+        if len(self.attachment_path) > 0:
             self.message = MIMEMultipart()
             self.message['Subject'] = self.subject
             self.message['From'] = self.mail_from
@@ -135,7 +142,8 @@ class EmailCreationAndSending(object):
                 for header in self.header:
                     header_name, header_value = separating_header_name_and_value(header)
                     self.message[header_name] = header_value
-            self.attaching_files_to_message(self.attachment_path[0])
+            if os.path.isfile(self.attachment_path[0]):
+                self.attaching_files_to_message(self.attachment_path[0])
             return self.message
 
         if self.data_file is not None:
