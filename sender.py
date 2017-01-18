@@ -11,6 +11,7 @@ from email.mime.base import MIMEBase
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from smtplib import SMTP
+import logging
 
 
 def header_type(string):
@@ -30,11 +31,13 @@ def defining_subject(headers):
         else:
             continue
     subject = header_subject.split("=")[-1]
+    log.info('Subject is defined: %s', subject)
     return subject
 
 
 def separating_header_name_and_value(header):
     header_name, header_value = header.split("=")
+    log.info('Defined: header: %s, header value: %s', header_name, header_value)
     return header_name, header_value
 
 
@@ -65,9 +68,10 @@ def mail_argument_configuration():
     parser.add_argument('--concurrency', action='store', default=1, type=int,
                         help='A number of simultaneous send')
     parser.add_argument('--send_stdout', action='store_true',
-                        help='Configuring sending an e-mail and redirecting it to STDOUT')
-    parser.add_argument('--attachment_path', action='store', nargs='*', default=[],
-                        help='A path to attachments in the message')
+                        help='Configuring sending an e-mail and redirecting \
+                        it to STDOUT')
+    parser.add_argument('--attachment_path', action='store', nargs='*',
+                        default=[], help='Path to attachments in the message')
     return parser
 
 
@@ -81,8 +85,9 @@ class SendingMailError(Exception):
 
 class EmailCreationAndSending(object):
 
-    def __init__(self, smtp_address, mail_from, rcpt_to, tls=False, user=None, pwd=None, header=None, data=None,
-                 data_file=None, count=1, concurrency=1, send_stdout=False, attachment_path=None):
+    def __init__(self, smtp_address, mail_from, rcpt_to, tls=False, user=None,
+                 pwd=None, header=None, data=None, data_file=None, count=1,
+                 concurrency=1, send_stdout=False, attachment_path=None):
         self.smtp_address = smtp_address
         self.tls = tls
         self.user = user
@@ -99,18 +104,6 @@ class EmailCreationAndSending(object):
         self.message = None
         self.subject = None
 
-    def main(self):
-        if not sys.stdin.isatty():
-            self.reading_from_stdin()
-        else:
-            self.message_creation()
-
-        # choose between sending message to std_out and sending via server to recipient
-        if self.send_stdout:
-            print self.message
-        else:
-            return self.send_mail()
-
     def reading_from_stdin(self):
         email_file = sys.stdin
         self.message = email_file.read()
@@ -119,16 +112,18 @@ class EmailCreationAndSending(object):
     def message_creation(self):
         if len(self.attachment_path) == 1:
             if self.data is None and self.data_file is None:
-                print "One attachment - singlepart"
+                log.info(u'Creating singlepart message with one attachment \
+                          and no data is started')
                 return self.creating_singlepart_msg()
             else:
-                print "One attachment - multipart"
+                log.info(u'Creating multipart message with one attachment \
+                          and data is started')
                 return self.creating_multipart_msg()
         elif len(self.attachment_path) > 1:
-            print "MULTIPART"
+            log.info(u'Creating multipart message is started')
             return self.creating_multipart_msg()
         else:
-            print "Just singlepart"
+            log.info(u'Creating simple singlepart message is started')
             return self.creating_singlepart_msg()
 
     def creating_singlepart_msg(self):
@@ -136,12 +131,12 @@ class EmailCreationAndSending(object):
         if len(self.attachment_path) > 0:
             self.message = MIMEMultipart()
             self.message['Subject'] = self.subject
-            self.message['From'] = self.mail_from
+            self.message['From'] = self.user
             self.message['To'] = ", ".join(self.rcpt_to)
             if len(self.header) > 0:
                 for header in self.header:
-                    header_name, header_value = separating_header_name_and_value(header)
-                    self.message[header_name] = header_value
+                    header, value = separating_header_name_and_value(header)
+                    self.message[header] = value
             if os.path.isfile(self.attachment_path[0]):
                 self.attaching_files_to_message(self.attachment_path[0])
             return self.message
@@ -152,7 +147,7 @@ class EmailCreationAndSending(object):
         elif self.data is not None:
             self.message = MIMEText(self.data)
         self.message['Subject'] = self.subject
-        self.message['From'] = self.mail_from
+        self.message['From'] = self.user
         self.message['To'] = ", ".join(self.rcpt_to)
         return self.message
 
@@ -160,12 +155,12 @@ class EmailCreationAndSending(object):
         self.subject = defining_subject(self.header)
         self.message = MIMEMultipart()
         self.message['Subject'] = self.subject
-        self.message['From'] = self.mail_from
+        self.message['From'] = self.user
         self.message['To'] = ", ".join(self.rcpt_to)
         if len(self.header) > 0:
             for header in self.header:
-                header_name, header_value = separating_header_name_and_value(header)
-                self.message[header_name] = header_value
+                header, value = separating_header_name_and_value(header)
+                self.message[header] = value
 
         if self.data_file is not None:
             with open(self.data_file, 'rb') as fp:
@@ -187,44 +182,65 @@ class EmailCreationAndSending(object):
             content_type, encoding = mimetypes.guess_type(attachment_file)
             maintype, subtype = content_type.split('/', 1)
             with open(attachment_file, 'rb') as fp:
-                if maintype == "text":
-                    msg = MIMEText(fp.read(), _subtype=subtype)
-                elif maintype == "image":
-                    msg = MIMEImage(fp.read(), _subtype=subtype)
-                elif maintype == "audio":
-                    msg = MIMEAudio(fp.read(), _subtype=subtype)
-                else:
-                    msg = MIMEBase(maintype, subtype)
-                    msg.set_payload(fp.read())
-            msg.add_header("Content-Disposition", 'attachment', filename=attachment_file)
+                msg = MIMEBase(maintype, subtype)
+                msg.set_payload(fp.read())
+                email.encoders.encode_base64(msg)
+                msg.add_header("Content-Disposition", 'attachment',
+                               filename=attachment_file)
             self.message.attach(msg)
         except Exception:
-            raise AttachmentFileError("The file cannot be attached. Please try again!")
+            log.error(u'Attachment File Error is raised')
+            raise AttachmentFileError("The file cannot be attached. \
+                                        Please try again!")
         return self.message
 
     def send_mail(self):
         server = SMTP(self.smtp_address)
-        print "Client is connected to server"
+        log.info(u'Client is connected to server')
         server.ehlo()
         if self.tls:
             server.starttls()
-        server.login(self.user, self.pwd)
-        print "Username and password are correct"
+        server.login(self.mail_from, self.pwd)
+        log.info(u'Username and password are correct')
         try:
-            server.sendmail(self.mail_from, self.rcpt_to, self.message.as_string())
-            print 'Your message was successfully send! Congratulations!!!'
+            server.sendmail(self.mail_from, self.rcpt_to,
+                            self.message.as_string())
+            log.info(u'Your message was successfully send! Congratulations!!!')
         except Exception:
+            log.error(u'Sending Mail Error is raised')
             raise SendingMailError("Message cannot be sent!")
         finally:
             server.quit()
 
 
+def main():
+    parser = mail_argument_configuration()
+    args = parser.parse_args()
+    log.info('%s', args)
+    mail = EmailCreationAndSending(args.smtp_address, args.mail_from,
+                                   args.rcpt_to, args.tls, args.user, args.pwd,
+                                   args.header, args.data, args.data_file,
+                                   args.count, args.concurrency,
+                                   args.send_stdout, args.attachment_path)
+    if not sys.stdin.isatty():
+        log.info(u'The message is being read from stdin')
+        mail.reading_from_stdin()
+    else:
+        log.info(u'The message is being created')
+        mail.message_creation()
+    if args.send_stdout:
+        log.info(u'The message is being sent to stdout')
+        message = mail.message_creation()
+        print message
+    else:
+        log.info(u'The message is being sent to recipient')
+        mail.send_mail()
+
+
 if __name__ == "__main__":
-    p = mail_argument_configuration()
-    args = p.parse_args()
-    print args
-    mail = EmailCreationAndSending(args.smtp_address, args.mail_from, args.rcpt_to, args.tls, args.user, args.pwd, args.header,
-                         args.data, args.data_file, args.count, args.concurrency, args.send_stdout,
-                         args.attachment_path)
-    mail.main()
+    FORMAT = u'%(asctime)s - %(levelname)s - %(message)s'
+    logging.basicConfig(format=FORMAT, filename=u'email.log',
+                        level=logging.DEBUG)
+    log = logging.getLogger(__name__)
+    main()
 
