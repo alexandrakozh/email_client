@@ -3,7 +3,6 @@ import sender
 from collections import OrderedDict
 from mock import MagicMock, patch
 from argparse import ArgumentParser
-import logging
 
 
 all_args_for_list = [
@@ -45,42 +44,6 @@ required_args = [
     ]
 required_args = OrderedDict(required_args)
 
-one_attachment_no_data = [
-    ('_smtp_address', 'smtp_gmail.com:587'),
-    ('mail_from', 'foo@mail.net'),
-    ('rcpt_to', ['bar@mail.net', 'baz@mail.net']),
-    ('attachment_path', ['1', '2']),
-    ('data', None),
-    ('data_file', None)
-    ]
-one_attachment_no_data = OrderedDict(one_attachment_no_data)
-
-one_attachment_and_data = [
-    ('_smtp_address', 'smtp_gmail.com:587'),
-    ('mail_from', 'foo@mail.net'),
-    ('rcpt_to', ['bar@mail.net', 'baz@mail.net']),
-    ('attachment_path', ['1']),
-    ('data', 'Hi!')
-    ]
-one_attachment_and_data = OrderedDict(one_attachment_and_data)
-
-many_attachments = [
-    ('_smtp_address', 'smtp_gmail.com:587'),
-    ('mail_from', 'foo@mail.net'),
-    ('rcpt_to', ['bar@mail.net', 'baz@mail.net']),
-    ('attachment_path', ['1', '2', '3']),
-    ('data', 'Hi!'),
-    ('data_file', '1.txt')
-    ]
-many_attachments = OrderedDict(many_attachments)
-
-one_data = [
-    ('_smtp_address', 'smtp_gmail.com:587'),
-    ('mail_from', 'foo@mail.net'),
-    ('rcpt_to', ['bar@mail.net', 'baz@mail.net']),
-    ('data', 'Hi!')
-    ]
-one_data = OrderedDict(one_data)
 
 def dict_to_cmd_list(d):
     res = []
@@ -135,33 +98,31 @@ class TestEmailClient(unittest.TestCase):
             i += 1
 
     def test_generate_message_singlepart(self):
-        for d in (one_attachment_no_data, one_data):
-            with patch.object(sender.EmailCreation, 'create_singlepart_msg') as mock_method:
-                parser = sender.mail_argument_configure()
-                args = parser.parse_args(dict_to_cmd_list(d))
-                m = sender.EmailCreation(args.mail_from, args.rcpt_to, args.user,
-                                     args.headers, args.data, args.data_file,
-                                     args.attachment_path)
+        with patch.object(sender.Email, 'create_singlepart_msg') as mock_method:
+            m = sender.Email(mail_from='a', rcpt_to='b',
+                             attachment_path='1.txt')
+            message = m.generate_message()
+            mock_method.assert_called()
 
-                mock_method.assert_called()
+        with patch.object(sender.Email, 'create_singlepart_msg') as mock_method:
+            m = sender.Email(mail_from='a', rcpt_to='b', data='Hi!')
+            message = m.generate_message()
+            mock_method.assert_called()
+
 
     def test_generate_message_multipart(self):
-        for i in (one_attachment_and_data, many_attachments):
-            with patch.object(sender.EmailCreation, 'create_multipart_msg') as mock_method:
-                parser = sender.mail_argument_configure()
-                args = parser.parse_args(dict_to_cmd_list(i))
-                m = sender.EmailCreation(args.mail_from, args.rcpt_to, args.user,
-                                     args.headers, args.data, args.data_file,
-                                     args.attachment_path)
-                message = m.generate_message()
-                mock_method.assert_called()
+        with patch.object(sender.Email, 'create_multipart_msg') as mock_method:
+            m = sender.Email(mail_from='a', rcpt_to='b', data='Hi!',
+                             attachment_path=['1.txt'])
+            message = m.generate_message()
+            mock_method.assert_called()
 
-        
+        with patch.object(sender.Email, 'create_multipart_msg') as mock_method:
+            m = sender.Email(mail_from='a', rcpt_to='b',
+                             attachment_path=['1.txt', '2.txt', '3.txt'])
+            message = m.generate_message()
+            mock_method.assert_called()
 
 
 if __name__ == '__main__':
-    FORMAT = u'%(asctime)s - %(levelname)s - %(message)s'
-    logging.basicConfig(format=FORMAT, filename=u'email.log',
-                        level=logging.DEBUG)
-    log = logging.getLogger(__name__)
     unittest.main()

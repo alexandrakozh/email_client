@@ -12,6 +12,11 @@ from smtplib import SMTP
 import logging
 from email.header import Header
 
+FORMAT = u'%(asctime)s - %(levelname)s - %(message)s'
+logging.basicConfig(format=FORMAT, filename=u'email.log',
+                    level=logging.DEBUG)
+log = logging.getLogger(__name__)
+
 
 def header_type(string):
     pattern = re.compile("(?P<header_name>\w+-?\w+)=(?P<header_value>[\w ]+)")
@@ -20,16 +25,6 @@ def header_type(string):
         msg = "%r is not an appropriate header type (name=value)" % string
         raise argparse.ArgumentTypeError(msg)
     return string
-
-
-def get_subject(headers):
-    header_subject = None
-    for i in headers:
-        if i.lower().startswith("subject"):
-            header_subject = i
-            break
-    subject = header_subject.split("=")[-1]
-    return subject
 
 
 def handling_header(header):
@@ -86,7 +81,7 @@ class SendingMailError(Exception):
     pass
 
 
-class EmailCreation(object):
+class Email(object):
 
     def __init__(self, mail_from, rcpt_to, user=None, headers=None, data=None,
                  data_file=None, attachment_path=None):
@@ -126,8 +121,6 @@ class EmailCreation(object):
             return self.create_singlepart_msg()
 
     def create_singlepart_msg(self):
-        self._subject = get_subject(self.headers)
-        log.info('Subject: %s', self.subject)
         if len(self.attachment_path) > 0:
             attachment = self.attachment_path[0]
             with open(attachment, 'rb') as f:
@@ -138,7 +131,8 @@ class EmailCreation(object):
             email.encoders.encode_base64(msg)
             msg.add_header("Content-Disposition", 'attachment',
                            filename=attachment)
-            self.add_headers_to_msg()
+            if self.headers is not None:
+                self.add_headers_to_msg()
 
             if os.path.isfile(attachment):
                 log.info(u'File %s is attaching to message',
@@ -151,14 +145,14 @@ class EmailCreation(object):
                 self._message = MIMEText(fp.read())
         elif self.data is not None:
             self._message = MIMEText(self.data)
-        self.add_headers_to_msg()
+        if self.headers is not None:
+            self.add_headers_to_msg()
         return self.message
 
     def create_multipart_msg(self):
-        self._subject = get_subject(self.headers)
-        log.info('Subject: %s', self.subject)
         self._message = MIMEMultipart()
-        self.add_headers_to_msg()
+        if self.headers is not None:
+            self.add_headers_to_msg()
 
         if self.data_file is not None and self.data is not None:
             self.attachment_path.append(self.data_file)
@@ -181,7 +175,7 @@ class EmailCreation(object):
     def add_headers_to_msg(self):
         self.message['From'] = self.user
         self.message['To'] = ", ".join(self.rcpt_to)
-        if len(self.headers) > 0:
+        if self.headers is not None:
             for header in self.headers:
                 header, value = handling_header(header)
                 log.info('Header: %s, header-value: %s', header, value)
@@ -250,7 +244,7 @@ def main():
     parser = mail_argument_configure()
     args = parser.parse_args()
     log.info('Arguments: %s', args)
-    message = EmailCreation(args.mail_from, args.rcpt_to, args.user,
+    message = Email(args.mail_from, args.rcpt_to, args.user,
                             args.headers, args.data, args.data_file,
                             args.attachment_path)
 
@@ -274,8 +268,4 @@ def main():
         mail.server_disconnect()
 
 if __name__ == "__main__":
-    FORMAT = u'%(asctime)s - %(levelname)s - %(message)s'
-    logging.basicConfig(format=FORMAT, filename=u'email.log',
-                        level=logging.DEBUG)
-    log = logging.getLogger(__name__)
     main()
