@@ -100,12 +100,13 @@ class TestEmailClient(unittest.TestCase):
     def test_generate_message_singlepart(self):
         with patch.object(sender.Email, 'create_singlepart_msg') as mock_method:
             m = sender.Email(mail_from='a', rcpt_to='b',
-                             attachment_path='1.txt')
+                             attachment_path=['1.txt'])
             message = m.generate_message()
             mock_method.assert_called()
 
         with patch.object(sender.Email, 'create_singlepart_msg') as mock_method:
-            m = sender.Email(mail_from='a', rcpt_to='b', data='Hi!')
+            m = sender.Email(mail_from='a', rcpt_to='b', data='Hi!',
+                             attachment_path=[])
             message = m.generate_message()
             mock_method.assert_called()
 
