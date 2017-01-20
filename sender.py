@@ -11,6 +11,7 @@ from email.mime.multipart import MIMEMultipart
 from smtplib import SMTP
 import logging
 from email.header import Header
+import time
 
 FORMAT = u'%(asctime)s - %(levelname)s - %(message)s'
 logging.basicConfig(format=FORMAT, filename=u'email.log',
@@ -37,6 +38,7 @@ def read_from_stdin():
     mail = sys.stdin
     message = mail.read()
     return message
+
 
 
 def mail_argument_configure():
@@ -225,18 +227,37 @@ class EmailTransport(object):
         log.info(u'Username and password are correct')
         return self.server
 
-    def send_mail(self, message):
+    def send_mail(self, msg):
+        self.server.sendmail(self.mail_from, self.rcpt_to, msg.as_string())
+        return self.server
+
+    def send_multiple_messages(self, message):
         try:
-            self.server.sendmail(self.mail_from, self.rcpt_to,
-                                 message.as_string())
-            log.info(u'Your message was successfully send!')
+            if self.concurrency > 1:
+                n = self.count // self.concurrency
+                i = 0
+                while i < n:
+                    j = 0
+                    while j < self.concurrency:
+                        self.send_mail(message)
+                        time.sleep(5)
+                        j += 1
+                    i += 1
+
+            elif self.concurrency == 1:
+                i = 0
+                while i < self.count:
+                    self.send_mail(message)
+                    i += 1
+            log.info(u'Messages are sent')
         except Exception:
             log.error(u'Sending Mail Error is raised')
             raise SendingMailError("Message cannot be sent!")
-        return self.server
+        finally:
+            return self.server
 
     def server_disconnect(self):
-        log.info(u'Server is disconnecting')
+        log.info(u'Server disconnects')
         self.server.quit()
 
 
@@ -264,7 +285,7 @@ def main():
                               args.tls, args.user, args.pwd, args.count,
                               args.concurrency)
         mail.server_connect_and_login()
-        mail.send_mail(message)
+        mail.send_multiple_messages(message)
         mail.server_disconnect()
 
 if __name__ == "__main__":
