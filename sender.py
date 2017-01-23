@@ -11,6 +11,8 @@ from email.mime.multipart import MIMEMultipart
 from smtplib import SMTP
 import logging
 from email.header import Header
+import uuid
+import select
 
 FORMAT = u'%(asctime)s - %(levelname)s - %(message)s'
 logging.basicConfig(format=FORMAT, filename=u'email.log',
@@ -19,7 +21,7 @@ log = logging.getLogger(__name__)
 
 
 def header_type(string):
-    pattern = re.compile("(?P<header_name>\w+-?\w+)=(?P<header_value>[\w ]+)")
+    pattern = re.compile("(?P<header_name>.+)=(?P<header_value>.+)")
     match = pattern.match(string)
     if not match:
         msg = "%r is not an appropriate header type (name=value)" % string
@@ -37,6 +39,30 @@ def read_from_stdin():
     mail = sys.stdin
     message = mail.read()
     return message
+
+
+def message_in_stdin():
+    return (
+        not sys.stdin.isatty()
+        and sys.stdin in select.select([sys.stdin], [], [], 0)[0]
+    )
+
+
+def replacing_id_in_message(message, count):
+    if '#id#' in message:
+        msg = message.replace('#id#', str(count))
+    elif '#uuid#' in message:
+        msg = message.replace('#uuid#', uuid.uuid4().hex)
+    else:
+        msg = message
+    return msg
+
+
+def repeat(message, count):
+    i = 0
+    while i < count:
+        i += 1
+        yield message
 
 
 def mail_argument_configure():
@@ -99,10 +125,6 @@ class Email(object):
     def message(self):
         return self._message
 
-    @property
-    def subject(self):
-        return self._subject
-
     def generate_message(self):
         if len(self.attachment_path) == 1:
             if self.data is None and self.data_file is None:
@@ -155,12 +177,18 @@ class Email(object):
             self.add_headers_to_msg()
 
         if self.data_file is not None and self.data is not None:
-            self.attachment_path.append(self.data_file)
+            if os.path.isfile(self.data_file):
+                self.attachment_path.append(self.data_file)
+            else:
+                log.info(u"Data file %s doesn't exists", self.data_file)
         elif self.data_file is not None and self.data is None:
-            with open(self.data_file, 'rb') as fp:
-                text = fp.read()
-                msg = MIMEText(text)
-                self.message.attach(msg)
+            if os.path.isfile(self.data_file):
+                with open(self.data_file, 'rb') as fp:
+                    text = fp.read()
+                    msg = MIMEText(text)
+                    self.message.attach(msg)
+            else:
+                log.info(u"Data file %s doesn't exists", self.data_file)
         elif self.data is not None and self.data_file is None:
             msg = MIMEText(self.data)
             self.message.attach(msg)
@@ -225,18 +253,32 @@ class EmailTransport(object):
         log.info(u'Username and password are correct')
         return self.server
 
-    def send_mail(self, message):
+    def send_mail(self, msg):
+        self.server.sendmail(self.mail_from, self.rcpt_to, msg)
+        return self.server
+
+    def send_multiple_messages(self, message):
         try:
-            self.server.sendmail(self.mail_from, self.rcpt_to,
-                                 message.as_string())
-            log.info(u'Your message was successfully send!')
+            if self.count > 1:
+                messages = repeat(message, self.count)
+                count = 1
+                for msg in messages:
+                    msg = replacing_id_in_message(msg, count)
+                    self.send_mail(msg)
+                    count += 1
+                    next(messages)
+            else:
+                msg = replacing_id_in_message(message, count=1)
+                self.send_mail(msg)
+            log.info(u'Mail is sent')
         except Exception:
             log.error(u'Sending Mail Error is raised')
             raise SendingMailError("Message cannot be sent!")
-        return self.server
+        finally:
+            return self.server
 
     def server_disconnect(self):
-        log.info(u'Server is disconnecting')
+        log.info(u'Server disconnects')
         self.server.quit()
 
 
@@ -244,28 +286,31 @@ def main():
     parser = mail_argument_configure()
     args = parser.parse_args()
     log.info('Arguments: %s', args)
-    message = Email(args.mail_from, args.rcpt_to, args.user,
-                            args.headers, args.data, args.data_file,
-                            args.attachment_path)
 
-    if not sys.stdin.isatty():
+    if message_in_stdin():
         log.info(u'The message is being read from stdin')
         message = read_from_stdin()
     else:
+        message = Email(args.mail_from, args.rcpt_to, args.user,
+                        args.headers, args.data, args.data_file,
+                        args.attachment_path)
+        message = message.generate_message().as_string()
         log.info(u'The message is being created')
-        message = message.generate_message()
 
     if args.stdout:
+        msg = replacing_id_in_message(message, count=1)
         log.info(u'The message is being sent to stdout')
-        print message
+        print msg
     else:
         log.info(u'The message is being sent to recipient')
         mail = EmailTransport(args.smtp_address, args.mail_from, args.rcpt_to,
                               args.tls, args.user, args.pwd, args.count,
                               args.concurrency)
+
         mail.server_connect_and_login()
-        mail.send_mail(message)
+        mail.send_multiple_messages(message)
         mail.server_disconnect()
+
 
 if __name__ == "__main__":
     main()
