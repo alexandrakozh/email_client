@@ -31,7 +31,7 @@ def header_type(string):
 
 def handling_header(header):
     header_name, header_value = header.split("=")
-    header_value = Header(header_value, sys.stdin.encoding)
+    # header_value = Header(header_value, sys.stdin.encoding)
     return header_name, header_value
 
 
@@ -217,7 +217,6 @@ class Email(object):
             with open(attachment_file, 'rb') as fp:
                 msg = MIMEBase(maintype, subtype)
                 msg.set_payload(fp.read())
-                email.encoders.encode_base64(msg)
                 msg.add_header("Content-Disposition", 'attachment',
                                filename=attachment_file)
             self.message.attach(msg)
@@ -263,12 +262,14 @@ class EmailTransport(object):
                 messages = repeat(message, self.count)
                 count = 1
                 for msg in messages:
+                    msg = msg.as_string()
                     msg = replacing_id_in_message(msg, count)
                     self.send_mail(msg)
                     count += 1
-                    next(messages)
+
             else:
-                msg = replacing_id_in_message(message, count=1)
+                msg = message.as_string()
+                msg = replacing_id_in_message(msg, count=1)
                 self.send_mail(msg)
             log.info(u'Mail is sent')
         except Exception:
@@ -294,11 +295,12 @@ def main():
         message = Email(args.mail_from, args.rcpt_to, args.user,
                         args.headers, args.data, args.data_file,
                         args.attachment_path)
-        message = message.generate_message().as_string()
+        message = message.generate_message()
         log.info(u'The message is being created')
 
     if args.stdout:
-        msg = replacing_id_in_message(message, count=1)
+        msg = message.as_string()
+        msg = replacing_id_in_message(msg, count=1)
         log.info(u'The message is being sent to stdout')
         print msg
     else:
