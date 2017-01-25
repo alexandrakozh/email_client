@@ -13,6 +13,7 @@ import logging
 from email.header import Header
 import uuid
 import select
+import threading
 
 FORMAT = u'%(asctime)s - %(levelname)s - %(message)s'
 logging.basicConfig(format=FORMAT, filename=u'email.log',
@@ -105,6 +106,22 @@ class AttachmentFileError(Exception):
 
 class SendingMailError(Exception):
     pass
+
+
+class ThreadForSending(threading.Thread):
+
+    def __init__(self, message, server, mail_from, rcpt_to, count=None):
+        threading.Thread.__init__(self)
+        self.message = message
+        self.server = server
+        self.mail_from = mail_from
+        self.rcpt_to = rcpt_to
+        self.count = count
+
+    def run(self):
+        msg = replacing_id_in_message(self.message, self.count)
+        self.server.sendmail(self.mail_from, self.rcpt_to, msg)
+        return self.server
 
 
 class Email(object):
@@ -206,7 +223,7 @@ class Email(object):
         if self.headers is not None:
             for header in self.headers:
                 header, value = handling_header(header)
-                log.info('Header: %s, header-value: %s', header, value)
+                # log.info('Header: %s, header-value: %s', header, value)
                 self.message[header] = value
         return self.message
 
@@ -259,15 +276,39 @@ class EmailTransport(object):
     def send_multiple_messages(self, message):
         try:
             if self.count > 1:
-                messages = repeat(message, self.count)
-                count = 1
-                for msg in messages:
-                    msg = msg.as_string()
-                    msg = replacing_id_in_message(msg, count)
-                    self.send_mail(msg)
-                    count += 1
+                if self.concurrency > 1:
+                    print 'concurrency many'
+                    n = self.count // self.concurrency
+                    for _ in range(n):
+                        message.as_string()
+                        count = 1
+                        threads = []
+                        for k in range(self.concurrency):
+                            t = ThreadForSending(message, self.server,
+                                                 self.mail_from, self.rcpt_to,
+                                                 count)
+                            print 'thread is added'
+                            threads.append(t)
+                            count += 1
+
+                        for i in range(len(threads)):
+                            threads[i].start()
+                            print 'thread is started'
+                        for j in range(len(threads)):
+                            print 'thread join'
+                            threads[j].join()
+                else:
+                    print 'concurrency one'
+                    messages = repeat(message, self.count)
+                    count = 1
+                    for msg in messages:
+                        msg = msg.as_string()
+                        msg = replacing_id_in_message(msg, count)
+                        self.send_mail(msg)
+                        count += 1
 
             else:
+                print 'count 1'
                 msg = message.as_string()
                 msg = replacing_id_in_message(msg, count=1)
                 self.send_mail(msg)
@@ -308,7 +349,6 @@ def main():
         mail = EmailTransport(args.smtp_address, args.mail_from, args.rcpt_to,
                               args.tls, args.user, args.pwd, args.count,
                               args.concurrency)
-
         mail.server_connect_and_login()
         mail.send_multiple_messages(message)
         mail.server_disconnect()
@@ -316,3 +356,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
