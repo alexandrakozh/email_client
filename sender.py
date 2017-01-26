@@ -280,23 +280,29 @@ class EmailTransport(object):
         self.server.sendmail(self.mail_from, self.rcpt_to, msg)
         return self.server
 
+    def create_threads(self, count, message_generator):
+        threads = []
+        for _ in range(count):
+            t = ThreadForSending(message_generator.next(), self.smtp_address,
+                                 self.tls,self.mail_from, self.pwd,
+                                 self.rcpt_to)
+            log.info(u'Thread is created')
+            threads.append(t)
+        for i in range(len(threads)):
+            threads[i].start()
+        for j in range(len(threads)):
+            threads[j].join()
+
     def send_multiple_messages(self, message_generator):
         try:
             if self.concurrency > 1:
                 n = self.count // self.concurrency
+                message_remain = self.count % self.concurrency
                 for _ in range(n):
-                    threads = []
-                    for k in range(self.concurrency):
-                        t = ThreadForSending(message_generator.next(),
-                                             self.smtp_address,
-                                             self.tls, self.mail_from,
-                                             self.pwd, self.rcpt_to)
-                        log.info(u'Thread is created')
-                        threads.append(t)
-                    for i in range(len(threads)):
-                        threads[i].start()
-                    for j in range(len(threads)):
-                        threads[j].join()
+                    self.create_threads(self.concurrency,
+                                        message_generator)
+                self.create_threads(message_remain, message_generator)
+
             elif self.concurrency == 1:
                 i = 0
                 while i < self.count:
