@@ -272,8 +272,9 @@ class EmailTransport(object):
         if self.tls:
             log.info(u'TLS is started')
             self.server.starttls()
-        self.server.login(self.user, self.pwd)
-        log.info(u'Username and password are correct')
+        if self.user is not None and self.pwd is not None:
+            self.server.login(self.user, self.pwd)
+            log.info(u'Username and password are correct')
         return self.server
 
     def send_mail(self, msg):
@@ -333,7 +334,8 @@ def main():
                                        args.pwd, args.count,
                                        args.concurrency)
             transport.server_connect_and_login()
-            transport.send_mail(message)
+            for i in range(args.count):
+                transport.send_mail(message)
             transport.server_disconnect()
         else:
             print message
@@ -354,7 +356,8 @@ def main():
                                        args.concurrency)
             if args.count == 1:
                 transport.server_connect_and_login()
-                transport.send_mail(message.generate_message())
+                message = message.generate_message().as_string()
+                transport.send_mail(message)
                 transport.server_disconnect()
                 log.info(u'Your message was sent')
             else:
