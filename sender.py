@@ -144,18 +144,19 @@ class Email(object):
     def generate_message(self, index=1):
         if len(self.attachment_path) == 1:
             if self.data is None and self.data_file is None:
-                log.info(u'Creating singlepart message with one attachment \
+                log.debug(u'Create singlepart message with one attachment \
                           and no data')
                 return self.create_singlepart_msg(index)
             else:
-                log.info(u'Creating multipart message with one attachment \
+                log.debug(u'Create multipart message with one attachment \
                           and data')
                 return self.create_multipart_msg(index)
         elif len(self.attachment_path) > 1:
-            log.info(u'Creating multipart message')
+            log.debug(u'Creating multipart message with %d attachments',
+                      len(self.attachment_path))
             return self.create_multipart_msg(index)
         else:
-            log.info(u'Creating simple singlepart message')
+            log.debug(u'Creating singlepart message')
             return self.create_singlepart_msg(index)
 
     def create_singlepart_msg(self, index=1):
@@ -198,7 +199,7 @@ class Email(object):
             if os.path.isfile(self.data_file):
                 self.attachment_path.append(self.data_file)
             else:
-                log.info(u"Data file %s doesn't exists", self.data_file)
+                log.warning(u"Data file %s doesn't exists", self.data_file)
         elif self.data_file is not None and self.data is None:
             if os.path.isfile(self.data_file):
                 with open(self.data_file, 'rb') as fp:
@@ -206,7 +207,7 @@ class Email(object):
                     msg = MIMEText(text)
                     self.message.attach(msg)
             else:
-                log.info(u"Data file %s doesn't exists", self.data_file)
+                log.warning(u"Data file %s doesn't exists", self.data_file)
         elif self.data is not None and self.data_file is None:
             text = replacing_id_in_message(self.data, count=index)
             msg = MIMEText(text)
@@ -270,14 +271,14 @@ class EmailTransport(object):
 
     def connect_and_login(self):
         self.server = SMTP(self.smtp_address)
-        log.info(u'Client is connected to server')
+        log.debug(u'Client is connected to server')
         self.server.ehlo()
         if self.tls:
-            log.info(u'TLS is started')
+            log.debug(u'TLS is started')
             self.server.starttls()
         if self.user is not None and self.pwd is not None:
             self.server.login(self.user, self.pwd)
-            log.info(u'Username and password are correct')
+            log.debug(u'Username and password are correct')
         return self.server
 
     def send_mail(self, msg):
@@ -290,7 +291,7 @@ class EmailTransport(object):
             t = ThreadForSending(message_generator.next(), self.smtp_address,
                                  self.tls, self.user, self.mail_from, self.pwd,
                                  self.rcpt_to)
-            log.info(u'Thread is created')
+            log.debug(u'Thread is created')
             threads.append(t)
         for i in range(len(threads)):
             threads[i].start()
@@ -307,21 +308,18 @@ class EmailTransport(object):
                                         message_generator)
                 self.create_threads(message_remain, message_generator)
 
-            # TODO: create using threads
-
             elif self.concurrency == 1:
                 self.connect_and_login()
                 for msg in message_generator:
                     self.send_mail(msg)
+                self.disconnect()
             log.info(u'Mail is sent')
         except Exception:
             log.error(u'Sending Mail Error is raised')
             raise SendingMailError("Message cannot be sent!")
-        finally:
-            self.disconnect()
 
     def disconnect(self):
-        log.info(u'Server disconnects')
+        log.debug(u'Server disconnects')
         self.server.quit()
 
 
@@ -340,17 +338,19 @@ def main():
         log.debug(u'Object message is created')
         message_gen = message.message_generator(args.count)
 
+        #TODO: add stdout and send to stdin
+
     if args.stdout:
         for index, msg in enumerate(message_gen, 1):
             log.info(u'The message #%d is sent to stdout', index)
             print msg
     else:
         log.info(u'The message is being sent to recipient %r', args.rcpt_to)
-        transport = EmailTransport(args.smtp_address, args.mail_from,
-                                   args.rcpt_to, args.tls, args.user,
-                                   args.pwd, args.count,
-                                   args.concurrency)
-        transport.send_multiple_messages(message_gen)
+        smtp_server = EmailTransport(args.smtp_address, args.mail_from,
+                                     args.rcpt_to, args.tls, args.user,
+                                     args.pwd, args.count,
+                                     args.concurrency)
+        smtp_server.send_multiple_messages(message_gen)
         log.info(u'Your message has been sent successfully')
 
 
