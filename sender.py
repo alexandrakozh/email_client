@@ -102,11 +102,13 @@ class SendingMailError(Exception):
 
 class ThreadForSending(threading.Thread):
 
-    def __init__(self, message, smtp_address, tls, mail_from, pwd, rcpt_to):
+    def __init__(self, message, smtp_address, tls, user, mail_from, pwd,
+                 rcpt_to):
         threading.Thread.__init__(self)
         self.message = message
         self.smtp_address = smtp_address
         self.tls = tls
+        self.user = user
         self.mail_from = mail_from
         self.pwd = pwd
         self.rcpt_to = rcpt_to
@@ -116,7 +118,8 @@ class ThreadForSending(threading.Thread):
         server.ehlo()
         if self.tls:
             server.starttls()
-        server.login(self.mail_from, self.pwd)
+        if self.user is not None and self.pwd is not None:
+            server.login(self.user, self.pwd)
         server.sendmail(self.mail_from, self.rcpt_to, self.message)
         server.quit()
 
@@ -243,7 +246,7 @@ class Email(object):
                                         Please try again!")
         return self.message
 
-    def generate_messages(self, count=1):
+    def message_generator(self, count=1):
         counter = 1
         while counter <= count:
             msg = self.generate_message(index=counter)
@@ -265,7 +268,7 @@ class EmailTransport(object):
         self.concurrency = concurrency
         self.server = None
 
-    def server_connect_and_login(self):
+    def connect_and_login(self):
         self.server = SMTP(self.smtp_address)
         log.info(u'Client is connected to server')
         self.server.ehlo()
@@ -285,7 +288,7 @@ class EmailTransport(object):
         threads = []
         for _ in range(count):
             t = ThreadForSending(message_generator.next(), self.smtp_address,
-                                 self.tls,self.mail_from, self.pwd,
+                                 self.tls, self.user, self.mail_from, self.pwd,
                                  self.rcpt_to)
             log.info(u'Thread is created')
             threads.append(t)
@@ -304,18 +307,20 @@ class EmailTransport(object):
                                         message_generator)
                 self.create_threads(message_remain, message_generator)
 
+            # TODO: create using threads
+
             elif self.concurrency == 1:
-                i = 0
-                while i < self.count:
-                    for msg in message_generator:
-                        self.send_mail(msg)
-                self.server_connect_and_login()
+                self.connect_and_login()
+                for msg in message_generator:
+                    self.send_mail(msg)
             log.info(u'Mail is sent')
         except Exception:
             log.error(u'Sending Mail Error is raised')
             raise SendingMailError("Message cannot be sent!")
+        finally:
+            self.disconnect()
 
-    def server_disconnect(self):
+    def disconnect(self):
         log.info(u'Server disconnects')
         self.server.quit()
 
@@ -323,45 +328,30 @@ class EmailTransport(object):
 def main():
     parser = mail_argument_configure()
     args = parser.parse_args()
-    log.info(u'Arguments: %s', args)
+    log.debug(u'Arguments: %s', args)
 
     if message_in_stdin():
         log.info(u'The message is being read from stdin')
-        message = read_from_stdin()
-        if not args.stdout:
-            transport = EmailTransport(args.smtp_address, args.mail_from,
-                                       args.rcpt_to, args.tls, args.user,
-                                       args.pwd, args.count,
-                                       args.concurrency)
-            transport.server_connect_and_login()
-            for i in range(args.count):
-                transport.send_mail(message)
-            transport.server_disconnect()
-        else:
-            print message
+        message_str = read_from_stdin()
+        message_gen = iter((message_str,))
     else:
         message = Email(args.mail_from, args.rcpt_to, args.headers, args.data,
                         args.data_file, args.attachment_path)
-        log.info(u'Object message is created')
-        messages = message.generate_messages(args.count)
-        if args.stdout:
-            for msg in messages:
-                log.info(u'The message is sent to stdout')
-                print msg
-        else:
-            log.info(u'The message is  sent to recipient')
-            transport = EmailTransport(args.smtp_address, args.mail_from,
-                                       args.rcpt_to, args.tls, args.user,
-                                       args.pwd, args.count,
-                                       args.concurrency)
-            if args.count == 1:
-                transport.server_connect_and_login()
-                message = message.generate_message().as_string()
-                transport.send_mail(message)
-                transport.server_disconnect()
-                log.info(u'Your message was sent')
-            else:
-                transport.send_multiple_messages(messages)
+        log.debug(u'Object message is created')
+        message_gen = message.message_generator(args.count)
+
+    if args.stdout:
+        for index, msg in enumerate(message_gen, 1):
+            log.info(u'The message #%d is sent to stdout', index)
+            print msg
+    else:
+        log.info(u'The message is being sent to recipient %r', args.rcpt_to)
+        transport = EmailTransport(args.smtp_address, args.mail_from,
+                                   args.rcpt_to, args.tls, args.user,
+                                   args.pwd, args.count,
+                                   args.concurrency)
+        transport.send_multiple_messages(message_gen)
+        log.info(u'Your message has been sent successfully')
 
 
 if __name__ == "__main__":
