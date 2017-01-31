@@ -14,6 +14,8 @@ from email.header import Header
 import uuid
 import select
 import threading
+from itertools import chain, repeat
+
 
 FORMAT = u'%(asctime)s - %(levelname)s - %(message)s'
 logging.basicConfig(format=FORMAT, filename=u'email.log',
@@ -36,9 +38,7 @@ def get_header_name_value(header):
 
 
 def read_from_stdin():
-    mail = sys.stdin
-    message = mail.read()
-    return message
+    return sys.stdin.read()
 
 
 def message_in_stdin():
@@ -48,14 +48,17 @@ def message_in_stdin():
     )
 
 
-def replacing_id_in_message(message, count):
-    if '#id#' in message:
-        msg = message.replace('#id#', str(count))
-    elif '#uuid#' in message:
-        msg = message.replace('#uuid#', uuid.uuid4().hex)
+def replace_id_in_string(string, counter):
+    if '#id#' in string:
+        return string.replace('#id#', str(counter))
+    elif '#uuid#' in string:
+        return string.replace('#uuid#', uuid.uuid4().hex)
     else:
-        msg = message
-    return msg
+        return string
+
+
+def get_replaced_data(data, index):
+    return replace_id_in_string(data, counter=index)
 
 
 def mail_argument_configure():
@@ -100,28 +103,22 @@ class SendingMailError(Exception):
     pass
 
 
-class ThreadForSending(threading.Thread):
+class SendingThreads(threading.Thread):
 
-    def __init__(self, message, smtp_address, tls, user, mail_from, pwd,
-                 rcpt_to):
-        threading.Thread.__init__(self)
+    def __init__(self, transport, message, index):
+        super(SendingThreads, self).__init__()
+        self.transport = transport
         self.message = message
-        self.smtp_address = smtp_address
-        self.tls = tls
-        self.user = user
-        self.mail_from = mail_from
-        self.pwd = pwd
-        self.rcpt_to = rcpt_to
+        self.index = index
 
     def run(self):
-        server = SMTP(self.smtp_address)
-        server.ehlo()
-        if self.tls:
-            server.starttls()
-        if self.user is not None and self.pwd is not None:
-            server.login(self.user, self.pwd)
-        server.sendmail(self.mail_from, self.rcpt_to, self.message)
-        server.quit()
+        try:
+            self.transport.connect_and_login()
+            self.transport.send_mail(self.message, self.index)
+            self.transport.disconnect()
+        except Exception:
+            log.error(u'Sending Mail Error is raised')
+            raise SendingMailError("Message cannot be sent!")
 
 
 class Email(object):
@@ -135,58 +132,50 @@ class Email(object):
         self.data_file = data_file
         self.attachment_path = attachment_path
         self._message = None
-        self._subject = None
 
     @property
     def message(self):
         return self._message
 
-    def generate_message(self, index=1):
+    def _should_be_multipart(self):
         if len(self.attachment_path) == 1:
-            if self.data is None and self.data_file is None:
+            if not self.data  and not self.data_file:
                 log.debug(u'Create singlepart message with one attachment \
                           and no data')
-                return self.create_singlepart_msg(index)
+                return False
             else:
                 log.debug(u'Create multipart message with one attachment \
                           and data')
-                return self.create_multipart_msg(index)
+                return True
+        elif self.data and self.data_file:
+            return True
         elif len(self.attachment_path) > 1:
             log.debug(u'Creating multipart message with %d attachments',
                       len(self.attachment_path))
-            return self.create_multipart_msg(index)
+            return True
         else:
             log.debug(u'Creating singlepart message')
+            return False
+
+    def generate_message(self, index=1):
+        if self._should_be_multipart():
+            return self.create_multipart_msg(index)
+        else:
             return self.create_singlepart_msg(index)
 
     def create_singlepart_msg(self, index=1):
         if len(self.attachment_path) > 0:
             attachment = self.attachment_path[0]
-            with open(attachment, 'rb') as f:
-                content_type, encoding = mimetypes.guess_type(f)
-                maintype, subtype = content_type.split('/', 1)
-                msg = MIMEBase(maintype, subtype)
-                msg.set_payload(f.read())
-            email.encoders.encode_base64(msg)
-            msg.add_header("Content-Disposition", 'attachment',
-                           filename=attachment)
-            if self.headers is not None:
-                self.add_headers_to_msg(index=index)
+            self._message = self.attach_files_to_message(attachment)
 
-            if os.path.isfile(attachment):
-                log.info(u'File %s is attaching to message',
-                         attachment)
-                self.attach_files_to_message(attachment)
-            return self.message
-
-        if self.data_file is not None:
+        if self.data_file:
             with open(self.data_file, 'rb') as fp:
-                text = replacing_id_in_message(fp.read(), count=index)
-                self._message = MIMEText(text)
-        elif self.data is not None:
-            text = replacing_id_in_message(self.data, count=index)
-            self._message = MIMEText(text)
-        if self.headers is not None:
+                text = replace_id_in_string(fp.read(), index)
+        else:
+            text = replace_id_in_string(self.data, index)
+        self._message = MIMEText(text)
+
+        if self.headers:
             self.add_headers_to_msg(index=index)
         return self.message
 
@@ -195,79 +184,86 @@ class Email(object):
         if self.headers is not None:
             self.add_headers_to_msg(index=index)
 
-        if self.data_file is not None and self.data is not None:
-            if os.path.isfile(self.data_file):
-                self.attachment_path.append(self.data_file)
-            else:
-                log.warning(u"Data file %s doesn't exists", self.data_file)
-        elif self.data_file is not None and self.data is None:
+        text = None
+        if self.data and not self.data_file:
+            text = replace_id_in_string(self.data, index)
+        elif self.data_file and not self.data:
             if os.path.isfile(self.data_file):
                 with open(self.data_file, 'rb') as fp:
-                    text = replacing_id_in_message(fp.read(), count=index)
-                    msg = MIMEText(text)
-                    self.message.attach(msg)
+                    text = replace_id_in_string(fp.read(), index)
             else:
                 log.warning(u"Data file %s doesn't exists", self.data_file)
-        elif self.data is not None and self.data_file is None:
-            text = replacing_id_in_message(self.data, count=index)
+        elif self.data_file and self.data:
+            text = replace_id_in_string(self.data, index)
+            if os.path.isfile(self.data_file):
+                self.attachment_path.append(self.data_file)
+                print self.attachment_path
+            else:
+                log.warning(u"Data file %s doesn't exists", self.data_file)
+                raise ValueError('Data file doesn\'t exists')
+        if text:
             msg = MIMEText(text)
             self.message.attach(msg)
 
         for attachment in self.attachment_path:
-            if not os.path.isfile(attachment):
-                log.warning(u'File %s is not found', attachment)
-                continue
-            self.attach_files_to_message(attachment)
+            msg = self.attach_files_to_message(attachment)
+            self.message.attach(msg)
         return self.message
 
     def add_headers_to_msg(self, index=1):
         self.message['From'] = self.mail_from
         self.message['To'] = ", ".join(self.rcpt_to)
-        if self.headers is not None:
-            for header in self.headers:
-                name, value = get_header_name_value(header)
-                value = Header(replacing_id_in_message(value, count=index),
-                               sys.stdin.encoding)
-                self.message[name] = value
+        for header in self.headers:
+            name, value = get_header_name_value(header)
+            value = Header(replace_id_in_string(value, counter=index),
+                           sys.stdin.encoding)
+            self.message[name] = value
         return self.message
 
     def attach_files_to_message(self, attachment_file):
-        try:
-            content_type, encoding = mimetypes.guess_type(attachment_file)
-            maintype, subtype = content_type.split('/', 1)
-            with open(attachment_file, 'rb') as fp:
-                msg = MIMEBase(maintype, subtype)
-                msg.set_payload(fp.read())
-                msg.add_header("Content-Disposition", 'attachment',
-                               filename=attachment_file)
-            self.message.attach(msg)
-        except Exception:
-            log.error(u'Attachment File Error is raised')
-            raise AttachmentFileError("The file cannot be attached. \
-                                        Please try again!")
-        return self.message
+        if os.path.isfile(attachment_file):
+            log.info(u'File %s is attaching to message', attachment_file)
+            try:
+                content_type, encoding = mimetypes.guess_type(attachment_file)
+                maintype, subtype = content_type.split('/', 1)
+                with open(attachment_file, 'rb') as fp:
+                    msg = MIMEBase(maintype, subtype)
+                    msg.set_payload(fp.read())
+                    email.encoders.encode_base64(msg)
+                    msg.add_header("Content-Disposition", 'attachment',
+                                   filename=attachment_file)
+            except Exception:
+                log.error(u'Attachment File Error is raised')
+                raise AttachmentFileError("The file cannot be attached. \
+                                            Please try again!")
+        else:
+            log.warning(u'File %s is not found', attachment_file)
+            raise ValueError('File is not found')
+        return msg
 
     def message_generator(self, count=1):
-        counter = 1
-        while counter <= count:
-            msg = self.generate_message(index=counter)
+        for i in xrange(1, count+1):
+            msg = self.generate_message(index=i)
             yield msg.as_string()
-            counter += 1
 
 
 class EmailTransport(object):
 
     def __init__(self, smtp_address, mail_from, rcpt_to, tls=False, user=None,
-                 pwd=None, count=1, concurrency=1):
+                 pwd=None):
         self.smtp_address = smtp_address
         self.mail_from = mail_from
         self.rcpt_to = rcpt_to
         self.tls = tls
         self.user = user
         self.pwd = pwd
-        self.count = count
-        self.concurrency = concurrency
         self.server = None
+
+    def copy(self):
+        return self.__class__(
+            self.smtp_address, self.mail_from, self.rcpt_to,
+            self.tls, self.user, self.pwd
+        )
 
     def connect_and_login(self):
         self.server = SMTP(self.smtp_address)
@@ -281,46 +277,41 @@ class EmailTransport(object):
             log.debug(u'Username and password are correct')
         return self.server
 
-    def send_mail(self, msg):
-        self.server.sendmail(self.mail_from, self.rcpt_to, msg)
+    def send_mail(self, msg, index=1):
+        mail_from = replace_id_in_string(self.mail_from, index)
+        rcpt_to = replace_id_in_string(self.rcpt_to, index)
+        self.server.sendmail(mail_from, rcpt_to, msg)
         return self.server
-
-    def create_threads(self, count, message_generator):
-        threads = []
-        for _ in range(count):
-            t = ThreadForSending(message_generator.next(), self.smtp_address,
-                                 self.tls, self.user, self.mail_from, self.pwd,
-                                 self.rcpt_to)
-            log.debug(u'Thread is created')
-            threads.append(t)
-        for i in range(len(threads)):
-            threads[i].start()
-        for j in range(len(threads)):
-            threads[j].join()
-
-    def send_multiple_messages(self, message_generator):
-        try:
-            if self.concurrency > 1:
-                n = self.count // self.concurrency
-                message_remain = self.count % self.concurrency
-                for _ in range(n):
-                    self.create_threads(self.concurrency,
-                                        message_generator)
-                self.create_threads(message_remain, message_generator)
-
-            elif self.concurrency == 1:
-                self.connect_and_login()
-                for msg in message_generator:
-                    self.send_mail(msg)
-                self.disconnect()
-            log.info(u'Mail is sent')
-        except Exception:
-            log.error(u'Sending Mail Error is raised')
-            raise SendingMailError("Message cannot be sent!")
 
     def disconnect(self):
         log.debug(u'Server disconnects')
         self.server.quit()
+
+
+def send_messages(message_gen, transport, count=1, concurrency=1):
+    if concurrency > 1:
+        cycles, remains = divmod(count, concurrency)
+        ind = 1
+        for batch in chain(repeat(concurrency, cycles),
+                           repeat(remains, 1 if remains else 0)):
+            threads = [SendingThreads(transport.copy(), next(message_gen),
+                                      ind+1)
+                       for _ in range(batch)]
+
+            ind += batch
+            for thr in threads:
+                thr.start()
+            for thr in threads:
+                thr.join()
+    else:
+        try:
+            transport.connect_and_login()
+            for ind, msg in enumerate(message_gen, 1):
+                transport.send_mail(msg, ind)
+            transport.disconnect()
+        except Exception:
+            log.error(u'Sending Mail Error is raised')
+            raise SendingMailError("Message cannot be sent!")
 
 
 def main():
@@ -331,14 +322,12 @@ def main():
     if message_in_stdin():
         log.info(u'The message is being read from stdin')
         message_str = read_from_stdin()
-        message_gen = iter((message_str,))
+        message_gen = repeat(message_str, args.count)
     else:
         message = Email(args.mail_from, args.rcpt_to, args.headers, args.data,
                         args.data_file, args.attachment_path)
         log.debug(u'Object message is created')
         message_gen = message.message_generator(args.count)
-
-        #TODO: add stdout and send to stdin
 
     if args.stdout:
         for index, msg in enumerate(message_gen, 1):
@@ -348,9 +337,8 @@ def main():
         log.info(u'The message is being sent to recipient %r', args.rcpt_to)
         smtp_server = EmailTransport(args.smtp_address, args.mail_from,
                                      args.rcpt_to, args.tls, args.user,
-                                     args.pwd, args.count,
-                                     args.concurrency)
-        smtp_server.send_multiple_messages(message_gen)
+                                     args.pwd)
+        send_messages(message_gen, smtp_server, args.count, args.concurrency)
         log.info(u'Your message has been sent successfully')
 
 
