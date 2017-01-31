@@ -57,10 +57,6 @@ def replace_id_in_string(string, counter):
         return string
 
 
-def get_replaced_data(data, index):
-    return replace_id_in_string(data, counter=index)
-
-
 def mail_argument_configure():
     parser = argparse.ArgumentParser()
     parser.add_argument('smtp_address', action='store',
@@ -140,27 +136,22 @@ class Email(object):
     def _should_be_multipart(self):
         if len(self.attachment_path) == 1:
             if not self.data  and not self.data_file:
-                log.debug(u'Create singlepart message with one attachment \
-                          and no data')
                 return False
             else:
-                log.debug(u'Create multipart message with one attachment \
-                          and data')
                 return True
         elif self.data and self.data_file:
             return True
         elif len(self.attachment_path) > 1:
-            log.debug(u'Creating multipart message with %d attachments',
-                      len(self.attachment_path))
             return True
         else:
-            log.debug(u'Creating singlepart message')
             return False
 
     def generate_message(self, index=1):
         if self._should_be_multipart():
+            log.info(u'Create multipart message')
             return self.create_multipart_msg(index)
         else:
+            log.info(u'Create singlepart message')
             return self.create_singlepart_msg(index)
 
     def create_singlepart_msg(self, index=1):
@@ -309,9 +300,9 @@ def send_messages(message_gen, transport, count=1, concurrency=1):
             for ind, msg in enumerate(message_gen, 1):
                 transport.send_mail(msg, ind)
             transport.disconnect()
-        except Exception:
-            log.error(u'Sending Mail Error is raised')
-            raise SendingMailError("Message cannot be sent!")
+        except Exception as err:
+            log.critical(u'Sending Mail Error is raised')
+            raise SendingMailError("Message cannot be sent! %s" % str(err))
 
 
 def main():
