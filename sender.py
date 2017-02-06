@@ -15,6 +15,8 @@ import uuid
 import select
 import threading
 from itertools import chain, repeat
+from email.parser import HeaderParser
+import email.message
 
 
 FORMAT = u'%(asctime)s - %(levelname)s - %(message)s'
@@ -55,6 +57,24 @@ def replace_id_in_string(string, counter):
         return string.replace('#uuid#', uuid.uuid4().hex)
     else:
         return string
+
+
+def is_us_ascii(text):
+    try:
+        text.encode('us-ascii')
+    except UnicodeEncodeError:
+        return False
+
+    return True
+
+
+def header_in_message(header, message):
+    parser = HeaderParser()
+    h = parser.parsestr(message)
+    if header in h.keys():
+        return True
+    else:
+        return False
 
 
 def mail_argument_configure():
@@ -204,9 +224,13 @@ class Email(object):
         self.message['To'] = ", ".join(self.rcpt_to)
         for header in self.headers:
             name, value = get_header_name_value(header)
-            value = Header(replace_id_in_string(value, counter=index),
-                           sys.stdin.encoding)
-            self.message[name] = value
+            value = replace_id_in_string(value, counter=index)
+            if not is_us_ascii(value):
+                value = Header(value, 'iso-8859-1')
+            if name in self.message:
+                self.message.replace_header(name, value)
+            else:
+                self.message[name] = value
         return self.message
 
     @staticmethod
