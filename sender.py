@@ -148,10 +148,8 @@ class Email(object):
 
     def generate_message(self, index=1):
         if self._should_be_multipart():
-            log.info(u'Create multipart message')
             return self.create_multipart_msg(index)
         else:
-            log.info(u'Create singlepart message')
             return self.create_singlepart_msg(index)
 
     def create_singlepart_msg(self, index=1):
@@ -211,7 +209,8 @@ class Email(object):
             self.message[name] = value
         return self.message
 
-    def attach_files_to_message(self, attachment_file):
+    @staticmethod
+    def attach_files_to_message(attachment_file):
         if os.path.isfile(attachment_file):
             log.info(u'File %s is attaching to message', attachment_file)
             try:
